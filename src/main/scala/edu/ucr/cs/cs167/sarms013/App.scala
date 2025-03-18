@@ -19,12 +19,40 @@ import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 
 object App {
 
-    
     def main(args : Array[string]) {
         
-        val taskNumber = args[0]
-        val inputFile = args[1]
+        /*
+            Command-line arguments. 
+            Might need extra arguments depending on the task.
+        */
+        val taskNumber = args(0)
+        val inputFile = args(1)
 
+        /*
+            Spark configuration; local or online.
+            Should be the same across tasks.
+        */
+        val conf = new SparkConf
+        if (!conf.contains("spark.master"))
+            conf.setMaster("local[*]")
+            println(s"Using Spark master '${conf.get("spark.master")}'")
+
+        /*
+            SparkSession; enables usage of Spark apis.
+            Should be the same across tasks.
+        */
+        val spark = SparkSession
+            .builder()
+            .appName("CS167 Project")
+            .config(conf)
+            .getOrCreate()
+
+        /*
+            Note: 
+            All tasks except Task 1 load the input file as parquet.
+            This might mean that we can't generalize reading the input
+            in this initial setup.
+        */
 
         try {
             taskNumber match {
