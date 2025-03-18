@@ -10,9 +10,10 @@ import org.apache.spark.SparkConf
 import org.apache.spark.ml.feature.VectorAssembler
 
 // Task4 4: Machine Learning Imports
+import org.apache.spark.ml.regression.LinearRegression
 import org.apache.spark.ml.classification.{LogisticRegression, LinearSVCModel}
 import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
-import org.apache.spark.ml.feature.{HashingTF, StringIndexer, Tokenizer, StandardScaler}
+import org.apache.spark.ml.feature.{FeatureHasher, StandardScaler}
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.tuning.{ParamGridBuilder, TrainValidationSplit, TrainValidationSplitModel}
 import org.apache.spark.ml.{Pipeline, PipelineModel}
@@ -95,7 +96,34 @@ object App {
 
                     df.createOrReplaceTempView("CurrentData")
                     if (enableDBOut) { df.printSchema() }
+                    if (enableDBOut) { df.show(5) }
                     if (enableDebug) { System.out.println("[CreateOrReplaceTempView] Success!") }
+
+                    df = spark.sql(
+                        s"""
+                           | SELECT
+                           |    AVG(A.ELEV_mean) AS ELEV_mean,
+                           |    AVG(A.SLP_mean) AS SLP_mean,
+                           |    AVG(A.EVT_mean) AS EVT_mean,
+                           |    AVG(A.EVH_mean) AS EVH_mean,
+                           |    AVG(A.CH_mean) AS CH_mean,
+                           |    AVG(A.TEMP_ave) AS TEMP_ave,
+                           |    AVG(A.TEMP_min) AS TEMP_min,
+                           |    AVG(A.TEMP_max) AS TEMP_max,
+                           |    SUM(A.frp) AS fire_intensity,
+                           |    (SELECT YEAR(A.acq_date)) AS Year,
+                           |    (SELECT MONTH(A.acq_date)) AS Month,
+                           |    A.County
+                           | FROM CurrentData A
+                           | GROUP BY
+                           |    A.County,
+                           |    Year,
+                           |    Month
+                           |""".stripMargin)
+                    if (enableDBOut) { df.printSchema() }
+                    if (enableDBOut) { df.show(5) }
+                    if (enableDebug) { System.out.println("[SQL] Success!")}
+
 
                     /*
                         Transformations
@@ -105,66 +133,58 @@ object App {
                         "EVH_mean", "CH_mean", "TEMP_ave", 
                         "TEMP_min", "TEMP_max"
                     )
-                    val elevScaler = new StandardScaler()
-                        .setInputCol(inputColumns(0))
-                        .setOutputCol(inputColumns(0))
-                    val slpScaler = new StandardScaler()
-                        .setInputCol(inputColumns(1))
-                        .setOutputCol(inputColumns(1))
-                    val evtScaler = new StandardScaler()
-                        .setInputCol(inputColumns(2))
-                        .setOutputCol(inputColumns(2))
-                    val evhScaler = new StandardScaler()
-                        .setInputCol(inputColumns(3))
-                        .setOutputCol(inputColumns(3))
-                    val chScaler = new StandardScaler()
-                        .setInputCol(inputColumns(4))
-                        .setOutputCol(inputColumns(4))
-                    val tempAveScaler = new StandardScaler()
-                        .setInputCol(inputColumns(5))
-                        .setOutputCol(inputColumns(5))
-                    val tempMinScaler = new StandardScaler()
-                        .setInputCol(inputColumns(6))
-                        .setOutputCol(inputColumns(6))
-                    val tempMaxScaler = new StandardScaler()
-                        .setInputCol(inputColumns(7))
-                        .setOutputCol(inputColumns(7))
+                    val assembledVector = new VectorAssembler()
+                        .setInputCols(inputColumns)
+                        .setOutputCol("attributes")
+                    val standardScaler = new StandardScaler()
+                        .setInputCol("attributes")
+                        .setOutputCol("features")
                     if (enableDebug) { System.out.println("[CreatedTransforms] Success!") }
 
-                    
+                    val linReg = new LinearRegression()
+                      .setFeaturesCol("features")
+                      .setLabelCol("fire_intensity")
+                    if (enableDebug) { System.out.println("[CreatedLogisticRegressionClassifier] Success!") }
+
+
                     /*
                         Pipeline
                     */
                     val pipeline = new Pipeline()
-                      .setStages(Array(
-                          elevScaler, slpScaler, evtScaler,
-                          evhScaler, chScaler, tempAveScaler,
-                          tempMinScaler, tempMaxScaler
-                      ))
+                        .setStages(Array(
+                            assembledVector,
+                            standardScaler,
+                            linReg
+                        ))
                     if (enableDebug) { System.out.println("[CreatedPipeline] Success!") }
 
-                    val logReg = new LogisticRegression()
-                    if (enableDebug) { System.out.println("[CreatedLogisticRegressionClassifier] Success!") }
 
                     val paramGrid: Array[ParamMap] = new ParamGridBuilder()
-                        //.addGrid(hashingTF.numFeatures, Array(1024, 2048))
-                        .addGrid(logReg.fitIntercept, Array(true,false))
-                        .addGrid(logReg.regParam,	Array(0.01, 0.0001))
-                        .addGrid(logReg.maxIter,	Array(10, 15))
-                        .addGrid(logReg.threshold,	Array(0, 0.25))
-                        .addGrid(logReg.tol,	Array(0.0001, 0.01))
+                        .addGrid(linReg.fitIntercept, Array(true,false))
+                        .addGrid(linReg.regParam,	Array(0.01, 0.0001))
+                        .addGrid(linReg.maxIter,	Array(10, 15))
+                        .addGrid(linReg.tol,	Array(0.0001, 0.01))
                         .build()
                     if (enableDebug) { System.out.println("[CreatedParamGrid] Success!")}
 
+                    val binaryClassificationEvaluator = new BinaryClassificationEvaluator()
+                        .setLabelCol("fire_intensity")
+                        .setRawPredictionCol("prediction")
+                    if (enableDebug) { System.out.println("[CreatedBinaryEvaluator] Success!")}
+
                     val cv = new TrainValidationSplit()
                         .setEstimator(pipeline)
-                        .setEvaluator(new BinaryClassificationEvaluator())
+                        .setEvaluator(binaryClassificationEvaluator)
                         .setEstimatorParamMaps(paramGrid)
                         .setTrainRatio(0.8)
                         .setParallelism(2)
-                    if (enableDebug) { System.out.println("[CreatedTrainVaidationSplit] Success!")}
+                    if (enableDebug) { System.out.println("[CreatedTrainValidationSplit] Success!")}
 
+                    if (enableDBOut) { df.show(5) }
                     val Array(trainingData: Dataset[Row], testData: Dataset[Row]) = df.randomSplit(Array(0.8, 0.2))
+                    if (enableDebug) { System.out.println(trainingData)}
+                    if (enableDebug) { System.out.println("[SplitData] Success!")}
+
                     val model: TrainValidationSplitModel = cv.fit(trainingData)
                     if (enableDebug) { System.out.println("[RanCrossValidation] Success!")}
 
@@ -172,55 +192,43 @@ object App {
                     /*
                         Best Parameters
                     */
-                    val numFeatures: Int = model.bestModel
-                        .asInstanceOf[PipelineModel]
-                        .stages(1)
-                        .asInstanceOf[HashingTF]
-                        .getNumFeatures
                     val fitIntercept: Boolean = model.bestModel
                         .asInstanceOf[PipelineModel]
-                        .stages(3)
-                        .asInstanceOf[LogisticRegression]
+                        .stages(2)
+                        .asInstanceOf[LinearRegression]
                         .getFitIntercept
                     val regParam: Double = model.bestModel
                         .asInstanceOf[PipelineModel]
-                        .stages(3)
-                        .asInstanceOf[LogisticRegression]
+                        .stages(2)
+                        .asInstanceOf[LinearRegression]
                         .getRegParam
                     val maxIter: Double = model.bestModel
                         .asInstanceOf[PipelineModel]
-                        .stages(3)
-                        .asInstanceOf[LogisticRegression]
+                        .stages(2)
+                        .asInstanceOf[LinearRegression]
                         .getMaxIter
-                    val threshold: Double = model.bestModel
-                        .asInstanceOf[PipelineModel]
-                        .stages(3)
-                        .asInstanceOf[LogisticRegression]
-                        .getThreshold
                     val tol: Double = model.bestModel
                         .asInstanceOf[PipelineModel]
-                        .stages(3)
-                        .asInstanceOf[LogisticRegression]
+                        .stages(2)
+                        .asInstanceOf[LinearRegression]
                         .getTol
 
-                    println("--Parameters of the best Model--")
-                    println("numFeatures: ", numFeatures)
-                    println("fitIntercept: ", fitIntercept)
-                    println("regParam: ", regParam)
-                    println("maxIter: ", maxIter)
-                    println("threshold: ", threshold)
-                    println("tol: ", tol)
-                    println()
+                    System.out.println("--Parameters of the best Model--")
+                    System.out.println("fitIntercept: ", fitIntercept)
+                    System.out.println("regParam: ", regParam)
+                    System.out.println("maxIter: ", maxIter)
+                    System.out.println("tol: ", tol)
+                    System.out.println()
+                    if (enableDebug) { System.out.println("[ChoosingBestModel] Success!")}
+
 
                     /*
                         Running and Evaluation
                     */
                     val predictions: DataFrame = model.transform(testData)
-                    predictions.select("text", "sentiment", "label", "prediction").show()
+                    predictions.select("features", "fire_intensity", "prediction").show()
 
-                    val binaryClassificationEvaluator = new BinaryClassificationEvaluator()
-                        .setLabelCol("label")
-                        .setRawPredictionCol("prediction")
+
 
                     val accuracy: Double = binaryClassificationEvaluator.evaluate(predictions)
                     println(s"Accuracy of the test set is $accuracy")
