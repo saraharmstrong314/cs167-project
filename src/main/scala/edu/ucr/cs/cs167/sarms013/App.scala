@@ -7,10 +7,14 @@ package edu.ucr.cs.cs167.sarms013
 
 // General
 import org.apache.spark.SparkConf
-import org.apache.spark.ml.feature.VectorAssembler
+
 
 // Task4 4: Machine Learning Imports
-import org.apache.spark.ml.regression.LinearRegression
+import org.apache.spark.ml.evaluation.RegressionEvaluator
+import org.apache.spark.ml.feature.VectorAssembler
+import org.apache.spark.ml.tuning.CrossValidator
+// import org.apache.spark.mllib.regression.LinearRegressionModel
+import org.apache.spark.ml.regression.{LinearRegression, LinearRegressionModel}
 import org.apache.spark.ml.classification.{LogisticRegression, LinearSVCModel}
 import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
 import org.apache.spark.ml.feature.{FeatureHasher, StandardScaler}
@@ -83,15 +87,18 @@ object App {
                 // TODO: Task 4: Fire Intensity Prediction
                 case "4" =>
 
-                    val enableDebug = true
-                    val enableDBOut = true
+                    val enableDebug = false
+                    val enableDBOut = false
+                    val enableBestO = false
 
                     /*
                         Setup DF
                      */
-                    if (enableDebug) { System.out.println("Starting task 4...") }
+                    val startTime = System.nanoTime
 
+                    if (enableDebug) { System.out.println("Starting task 4...") }
                     var df = spark.read.parquet(inputFile)
+                    var originalDF = df
                     if (enableDebug) { System.out.println("[ReadParquet] Success!") } 
 
                     df.createOrReplaceTempView("CurrentData")
@@ -142,8 +149,9 @@ object App {
                     if (enableDebug) { System.out.println("[CreatedTransforms] Success!") }
 
                     val linReg = new LinearRegression()
-                      .setFeaturesCol("features")
-                      .setLabelCol("fire_intensity")
+                        .setFeaturesCol("features")
+                        .setLabelCol("fire_intensity")
+                        .setMaxIter(1000)
                     if (enableDebug) { System.out.println("[CreatedLogisticRegressionClassifier] Success!") }
 
 
@@ -161,77 +169,117 @@ object App {
 
                     val paramGrid: Array[ParamMap] = new ParamGridBuilder()
                         .addGrid(linReg.fitIntercept, Array(true,false))
+                        .addGrid(linReg.elasticNetParam, Array(0.0, 0.3, 0.8, 1.0))
                         .addGrid(linReg.regParam,	Array(0.01, 0.0001))
-                        .addGrid(linReg.maxIter,	Array(10, 15))
+                        .addGrid(linReg.maxIter,	Array(10, 100))
                         .addGrid(linReg.tol,	Array(0.0001, 0.01))
                         .build()
                     if (enableDebug) { System.out.println("[CreatedParamGrid] Success!")}
 
-                    val binaryClassificationEvaluator = new BinaryClassificationEvaluator()
-                        .setLabelCol("fire_intensity")
-                        .setRawPredictionCol("prediction")
-                    if (enableDebug) { System.out.println("[CreatedBinaryEvaluator] Success!")}
 
-                    val cv = new TrainValidationSplit()
+                    /*
+                        Evaluators
+                     */
+                    val regressionEvaluator = new RegressionEvaluator()
+                        .setLabelCol("fire_intensity")
+                        .setPredictionCol("prediction")
+                        .setMetricName("rmse")
+                    val chosenEvaluator = regressionEvaluator
+                    if (enableDebug) { System.out.println("[CreatedAndChoseEvaluator] Success!")}
+
+
+                    /*
+                        Validators
+                     */
+                    val trainValidator = new TrainValidationSplit()
                         .setEstimator(pipeline)
-                        .setEvaluator(binaryClassificationEvaluator)
+                        .setEvaluator(chosenEvaluator)
                         .setEstimatorParamMaps(paramGrid)
                         .setTrainRatio(0.8)
                         .setParallelism(2)
-                    if (enableDebug) { System.out.println("[CreatedTrainValidationSplit] Success!")}
+                    val crossValidator = new CrossValidator()
+                        .setEstimator(pipeline)
+                        .setEvaluator(chosenEvaluator)
+                        .setEstimatorParamMaps(paramGrid)
+                        .setNumFolds(5)
+                        .setParallelism(2)
+                    val chosenValidator = crossValidator
+                    if (enableDebug) { System.out.println("[CreatedAndChoseValidator] Success!")}
 
                     if (enableDBOut) { df.show(5) }
                     val Array(trainingData: Dataset[Row], testData: Dataset[Row]) = df.randomSplit(Array(0.8, 0.2))
                     if (enableDebug) { System.out.println(trainingData)}
                     if (enableDebug) { System.out.println("[SplitData] Success!")}
 
-                    val model: TrainValidationSplitModel = cv.fit(trainingData)
+                    val model = chosenValidator.fit(trainingData)
                     if (enableDebug) { System.out.println("[RanCrossValidation] Success!")}
 
 
                     /*
                         Best Parameters
                     */
-                    val fitIntercept: Boolean = model.bestModel
-                        .asInstanceOf[PipelineModel]
-                        .stages(2)
-                        .asInstanceOf[LinearRegression]
-                        .getFitIntercept
-                    val regParam: Double = model.bestModel
-                        .asInstanceOf[PipelineModel]
-                        .stages(2)
-                        .asInstanceOf[LinearRegression]
-                        .getRegParam
-                    val maxIter: Double = model.bestModel
-                        .asInstanceOf[PipelineModel]
-                        .stages(2)
-                        .asInstanceOf[LinearRegression]
-                        .getMaxIter
-                    val tol: Double = model.bestModel
-                        .asInstanceOf[PipelineModel]
-                        .stages(2)
-                        .asInstanceOf[LinearRegression]
-                        .getTol
+                    if (enableBestO) {
+                        val fitIntercept = model.bestModel
+                            .asInstanceOf[PipelineModel]
+                            .stages(2)
+                            .asInstanceOf[LinearRegressionModel]
+                            .fitIntercept
+                        val netParam = model.bestModel
+                            .asInstanceOf[PipelineModel]
+                            .stages(2)
+                            .asInstanceOf[LinearRegressionModel]
+                            .elasticNetParam
+                        val regParam = model.bestModel
+                            .asInstanceOf[PipelineModel]
+                            .stages(2)
+                            .asInstanceOf[LinearRegressionModel]
+                            .regParam
+                        val maxIter = model.bestModel
+                            .asInstanceOf[PipelineModel]
+                            .stages(2)
+                            .asInstanceOf[LinearRegressionModel]
+                            .maxIter
+                        val tol = model.bestModel
+                            .asInstanceOf[PipelineModel]
+                            .stages(2)
+                            .asInstanceOf[LinearRegressionModel]
+                            .tol
 
-                    System.out.println("--Parameters of the best Model--")
-                    System.out.println("fitIntercept: ", fitIntercept)
-                    System.out.println("regParam: ", regParam)
-                    System.out.println("maxIter: ", maxIter)
-                    System.out.println("tol: ", tol)
-                    System.out.println()
-                    if (enableDebug) { System.out.println("[ChoosingBestModel] Success!")}
+
+                        System.out.println("--Parameters of the best Model--")
+                        System.out.println("fitIntercept: ", fitIntercept)
+                        System.out.println("elasticNetParam: ", netParam)
+                        System.out.println("regParam: ", regParam)
+                        System.out.println("maxIter: ", maxIter)
+                        System.out.println("Param: ", tol)
+                        System.out.println()
+                    }
+                    if (enableBestO) { System.out.println("[ChoosingBestModel] Success!")}
 
 
                     /*
                         Running and Evaluation
                     */
+                    val finalRegressionEvaluator = new RegressionEvaluator()
+                        .setLabelCol("fire_intensity")
+                        .setPredictionCol("prediction")
+                        .setMetricName("rmse")
+
                     val predictions: DataFrame = model.transform(testData)
-                    predictions.select("features", "fire_intensity", "prediction").show()
+                    predictions.select(
+                        "ELEV_mean", "SLP_mean", "EVT_mean",
+                        "EVH_mean", "CH_mean", "TEMP_ave",
+                        "TEMP_min", "TEMP_max", "fire_intensity", "prediction"
+                    ).show()
+                    if (enableDebug) { System.out.println("# of predictions: ", predictions.count()) }
+                    if (enableDBOut) { System.out.println("Original DF: "); originalDF.show() }
+                    if (enableDBOut) { System.out.println("Scaled DF: "); df.show() }
 
+                    val rsmeResult: Double = finalRegressionEvaluator.evaluate(predictions)
+                    System.out.println(s"RMSE of the test set is $rsmeResult")
 
-
-                    val accuracy: Double = binaryClassificationEvaluator.evaluate(predictions)
-                    println(s"Accuracy of the test set is $accuracy")
+                    val endTime = System.nanoTime
+                    System.out.println("Total Execution Time: " + (endTime - startTime) * 1E-9 + " seconds")
 
 
                 // TODO: Task 5: Temporal analysis - 2
