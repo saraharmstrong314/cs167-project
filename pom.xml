@@ -1,0 +1,89 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>edu.ucr.cs.cs167.sdera006</groupId>
+  <artifactId>wildfire-projectC</artifactId>
+  <version>1.0</version>
+
+  <name>Wildfire Data Project C</name>
+
+  <repositories>
+    <!-- Sonatype or BDLab repository if it's not on Maven Central -->
+    <repository>
+      <id>sonatype</id>
+      <name>Sonatype Releases</name>
+      <url>https://oss.sonatype.org/content/repositories/releases</url>
+    </repository>
+    <repository>
+      <id>bdlab-releases</id>
+      <name>UCR BDLab public repo</name>
+      <url>https://artifacts.bdlab.cs.ucr.edu/repository/maven-public/</url>
+    </repository>
+  </repositories>
+
+  <properties>
+    <!-- Use Java 8 or 11, whichever your environment uses -->
+    <maven.compiler.source>1.8</maven.compiler.source>
+    <maven.compiler.target>1.8</maven.compiler.target>
+
+    <!-- Spark and Beast versions to match Spark 3.2 or 3.3 -->
+    <spark.version>3.2.1</spark.version>
+    <beast.version>0.15.1</beast.version>
+    <scala.binary.version>2.12</scala.binary.version>
+  </properties>
+
+  <dependencies>
+    <!-- Spark Core & SQL -->
+    <dependency>
+      <groupId>org.apache.spark</groupId>
+      <artifactId>spark-core_2.12</artifactId>
+      <version>${spark.version}</version>
+      <!-- Often 'provided' if you run on a cluster that has Spark installed -->
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.spark</groupId>
+      <artifactId>spark-sql_2.12</artifactId>
+      <version>${spark.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- Beast for shapefile reading & spatial SQL functions -->
+    <dependency>
+      <groupId>org.locationtech.beast</groupId>
+      <!-- For Spark 3.2+ use beast-spark-3_2.12 or for 3.3+ also works -->
+      <artifactId>beast-spark-3_2.12</artifactId>
+      <version>0.15.1</version>
+      <scope>compile</scope>
+    </dependency>
+
+    <!-- Logging (optional but recommended) -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-log4j12</artifactId>
+      <version>1.7.36</version>
+      <scope>runtime</scope>
+    </dependency>
+
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Maven compiler plugin -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.8.1</version>
+        <configuration>
+          <source>1.8</source>
+          <target>1.8</target>
+        </configuration>
+      </plugin>
+
+    </plugins>
+  </build>
+
+</project>
