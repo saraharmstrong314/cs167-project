@@ -23,6 +23,6 @@ object App {
 
   // TODO: Task 5: Temporal analysis - 2
 
-  
+
 
 }
