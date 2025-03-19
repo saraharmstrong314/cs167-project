@@ -7,6 +7,7 @@ object App {
   def main(args: Array[String]): Unit = {
     val spark = SparkSession.builder()
       .appName("Wildfire Temporal Analysis")
+      .master("local[*]") // Run Spark locally with all available cores
       .config("spark.sql.parquet.enableVectorizedReader", "false")
       .getOrCreate()
 
@@ -17,16 +18,17 @@ object App {
     val endDate = "12-31-2020"
 
     // Load county dataset and filter for California (STATEFP = "06")
-    val countyDF = spark.read.format("parquet").load("/path/to/tl_2018_us_county.parquet")
+    val df = spark.read.parquet("C:/Users/jjin1/CS167/workspace/jjin060_project2/tl_2018_us_county.parquet")
       .filter($"STATEFP" === "06")
       .select($"GEOID", $"NAME".alias("county_name"))
 
     // Load wildfire dataset
-    val wildfireDF = spark.read.format("parquet").load("/path/to/wildfiredb_10k.parquet")
+    val wildfireDF = spark.read.format("parquet").load("C:/Users/jjin1/CS167/workspace/jjin060_project2/wildfiredb_10k.parquet")
       .withColumn("acq_date", to_date(col("acq_date"), "yyyy-MM-dd"))
       .filter(col("acq_date").between(to_date(lit(startDate), "MM-dd-yyyy"), to_date(lit(endDate), "MM-dd-yyyy")))
 
     // Perform an equi-join on GEOID = County
+    val countyDF = spark.read.parquet("C:/Users/jjin1/CS167/workspace/jjin060_project2/tl_2018_us_county.parquet")
     val joinedDF = wildfireDF.join(countyDF, wildfireDF("County") === countyDF("GEOID"))
 
     // Aggregate total fire intensity per county
