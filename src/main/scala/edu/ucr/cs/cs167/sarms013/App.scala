@@ -27,12 +27,7 @@ object App {
 
     def main(args : Array[String]) {
         
-        /*
-            Command-line arguments. 
-            Might need extra arguments depending on the task.
-        */
-        val taskNumber = args(0)
-        val inputFile = args(1)
+
 
         /*
             Spark configuration; local or online.
@@ -86,6 +81,12 @@ object App {
 
                 // TODO: Task 4: Fire Intensity Prediction
                 case "4" =>
+                    /*
+                        Command-line arguments. 
+                        Might need extra arguments depending on the task.
+                    */
+                    val taskNumber = args(0)
+                    val inputFile = args(1)
 
                     val enableDebug = false
                     val enableDBOut = false
