@@ -1,14 +1,16 @@
 package edu.ucr.cs.cs167.sdera006;
 
+import edu.ucr.cs.bdlab.beast.JavaSpatialSparkContext;
+import org.apache.spark.beast.CRSServer;
+import org.apache.spark.beast.SparkSQLRegistration;
+import org.apache.spark.SparkConf;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 
 import static org.apache.spark.sql.functions.*;
 
-import org.locationtech.beast.spark.BeastSparkSQLRegistrator;
-
-public class WildfireDataPreparation {
+public class App {
 
     public static void main(String[] args) {
         if (args.length < 3) {
@@ -20,21 +22,36 @@ public class WildfireDataPreparation {
         String countyZip = args[1];
         String outputParquet = args[2];
 
-        // 1. Initialize SparkSession
+        SparkConf conf = new SparkConf()
+                .setAppName("Wildfire Data Preparation (Spark + Beast)")
+                .setMaster("local[*]");
+
+
         SparkSession spark = SparkSession.builder()
-                .appName("Wildfire Data Preparation (Spark + Beast)")
-                // .master("local[*]") // Uncomment if testing locally
+                .config(conf)
                 .getOrCreate();
 
-        // 2. Register Beast SQL functions so we can use ST_CreatePoint, ST_Contains, etc.
-        BeastSparkSQLRegistrator.registerAll(spark);
+        // 3. Create the Beast JavaSpatialSparkContext from sparkSession
+        JavaSpatialSparkContext sparkContext = new JavaSpatialSparkContext(spark.sparkContext());
+
+        // 4. (Optional) Start the CRS server if you need coordinate transformations
+        CRSServer.startServer(sparkContext);
+
+        // 5. Register Beast's geometry UDT and UDF
+        //    This is where ST_Point, ST_Contains, etc. become known to Spark
+        SparkSQLRegistration.registerUDT();
+        SparkSQLRegistration.registerUDF(spark);
+
 
         // 3. Load the Wildfire CSV
         //    Spark can handle .bz2, .gz, .zip, etc. automatically if you just give the filename.
         Dataset<Row> wildfiresRaw = spark.read()
                 .option("header", "true")        // first line is header
                 .option("inferSchema", "false")  // we will manually cast
+                .option("delimiter", "\t")
                 .csv(wildfireCSV);
+
+        // System.out.println("Finished 3.");
 
         // 4. Keep only the needed columns
         Dataset<Row> wildfires = wildfiresRaw.select(
@@ -76,6 +93,8 @@ public class WildfireDataPreparation {
                 expr("ST_CreatePoint(x, y)")
         );
 
+        // System.out.println("Finished 7.");
+
         // 8. Load the county shapefile (zipped).
         //    Beast can read a zipped shapefile directly using format("shapefile").
         Dataset<Row> counties = spark.read()
@@ -83,9 +102,11 @@ public class WildfireDataPreparation {
                 .load(countyZip)
                 // keep geometry (the_geom) and GEOID
                 .select(
-                        col("the_geom").alias("county_geom"),
+                        col("geometry").alias("county_geom"),
                         col("GEOID")
                 );
+
+        // System.out.println("Finished 8.");
 
         // 9. Create temporary views to do a spatial join in SQL
         wildfires.createOrReplaceTempView("wildfires");
@@ -104,11 +125,16 @@ public class WildfireDataPreparation {
 
         Dataset<Row> joined = spark.sql(joinSQL);
 
+        // System.out.println("Finished 10.");
+
         // 11. Drop geometry column from final output
         Dataset<Row> finalDF = joined.drop("geometry");
 
+        // System.out.println("Finished 11.");
         // 12. Write as Parquet
         finalDF.write().mode("overwrite").parquet(outputParquet);
+
+        // System.out.println("Finished 12.");
 
         System.out.println("Done! Created Parquet at: " + outputParquet);
         spark.stop();
