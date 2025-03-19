@@ -38,13 +38,30 @@ object BeastScala {
       var df : DataFrame = sparkSession.read.parquet(inputfile)
       df.createOrReplaceTempView("wildfire_data")
       //df.show()
+      //df.printSchema()
 
       var counties : DataFrame = sparkSession.read.format("shapefile").load(countyFile)
       counties.createOrReplaceTempView("counties")
       //counties.show()
 
-      val countyGEOID = counties.filter(col("STATEFP") === "06" && col("NAME") === countyName).select("GEOID")
-      countyGEOID.show()
+      val countyGEOID = sparkSession.sql(
+          s"""
+            SELECT GEOID
+            FROM counties
+            WHERE NAME = "$countyName" AND STATEFP = "06"
+          """)
+      //countyGEOID.foreach(row => println(s"GEOID: ${row.getString(0)}"))
+
+//      val result = sparkSession.sql(
+//        s"""
+//           SELECT YEAR(acq_date) AS year, MONTH(acq_date) AS month, SUM(frp) AS total_fire_intensity
+//           FROM wildfire_data
+//           WHERE County = '$countyGEOID'
+//           GROUP BY YEAR(acq_date), MONTH(acq_date)
+//           ORDER BY year, month
+//        """)
+//
+//      result.show()
 
       /*operation match {
         case "count-by-county" =>
