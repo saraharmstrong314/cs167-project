@@ -28,32 +28,39 @@ object WildfireSpatioTemporalAnalysis {
     val wildfireDF = spark.read.parquet("wildfiredb_sample.parquet")
     wildfireDF.createOrReplaceTempView("wildfire_data")
 
+    //wildfireDF.show(5);
+
     // Load county dataset (Shapefile)
     val countyDF = spark.read.format("shapefile").load("tl_2018_us_county.zip")
     countyDF.createOrReplaceTempView("counties")
 
+    //countyDF.show(5);
+
     // Query to filter and sum fire intensity
     val filteredWildfires = spark.sql(
       s"""
-         |SELECT county, SUM(frp) AS fire_intensity
+         |SELECT County AS county_name, SUM(frp) AS fire_intensity
          |FROM wildfire_data
          |WHERE to_date(acq_date, 'yyyy-MM-dd')
          |      BETWEEN to_date('$startDate', 'MM/dd/yyyy')
          |      AND to_date('$endDate', 'MM/dd/yyyy')
-         |GROUP BY county
+         |GROUP BY County
        """.stripMargin
     )
     filteredWildfires.createOrReplaceTempView("fire_intensity_data")
 
-    // Ensure `county` matches `NAME` or `GEOID` in `counties`
+    //filteredWildfires.show(5);
+
+    // Ensure `County` in wildfire_data matches `NAME` or `GEOID` in `counties`
     val joinedDF = spark.sql(
       s"""
          |SELECT counties.GEOID, counties.NAME, counties.geometry AS g, fire_intensity
          |FROM fire_intensity_data
-         |JOIN counties ON fire_intensity_data.county = counties.NAME
-       """.stripMargin
+         |JOIN counties ON fire_intensity_data.county_name = counties.GEOID
+   """.stripMargin
     )
 
+    //joinedDF.show(5);
     // Output to Shapefile for QGIS visualization
     joinedDF.coalesce(1).write.format("shapefile").save(outputDir)
 
